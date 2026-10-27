@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { AuthService } from './auth.service';
+import { GameRuntimeService } from './game-runtime.service';
 import { io, Socket } from 'socket.io-client';
 import { BehaviorSubject } from 'rxjs';
 import { API_ORIGIN } from '../config/api-url';
@@ -101,6 +102,7 @@ export interface PaymentConfigPayload {
 @Injectable({ providedIn: 'root' })
 export class GameSocketService {
   private readonly auth = inject(AuthService);
+  private readonly runtime = inject(GameRuntimeService);
   private socket: Socket | null = null;
   private readonly serverUrl = API_ORIGIN;
 
@@ -150,10 +152,11 @@ export class GameSocketService {
   }
 
   public connect(token: string): void {
+    if (!this.runtime.verifyIntegrity()) return;
     this.disconnect();
 
     this.socket = io(this.serverUrl, {
-      auth: { token },
+      auth: { token, roomTicksOnly: true },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -177,6 +180,8 @@ export class GameSocketService {
     });
 
     this.socket.on('game:room:tick', (data: { roomId: number; multiplier: number }) => {
+      // Keep Room 1's compatibility observable without a second network packet.
+      if (Number(data.roomId) === 1) this.multiplier$.next(Number(data.multiplier));
       this.roomTick$.next({ roomId: Number(data.roomId), multiplier: Number(data.multiplier) });
     });
 

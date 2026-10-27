@@ -4,6 +4,7 @@
   "private": true,
   "main": "server.js",
   "scripts": {
+    "test": "node --test test/*.test.js",
     "start": "node server.js",
     "start:stk-test": "node stk-test.js"
   },

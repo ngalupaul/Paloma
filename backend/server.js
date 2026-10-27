@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 require('dotenv').config();
 const mongodb = require('./mongodb');
 const payhero = require('./payhero');
+const { configureSocketAudience, gameAudience, legacyTickAudience } = require('./socket-audience');
 
 function parseAllowedOrigins(value) {
   const raw = (value || 'http://localhost:4200').trim();
@@ -269,7 +270,7 @@ function getChatAccess(socket) {
 }
 
 function broadcastChatMessage(message) {
-  io.emit('chat:message', message);
+  gameAudience(io).emit('chat:message', message);
 }
 
 function appendChatMessage(message, broadcast = true) {
@@ -280,6 +281,7 @@ function appendChatMessage(message, broadcast = true) {
 }
 
 function emitChatSnapshot(socket) {
+  if (socket.presenceOnly) return;
   socket.emit('chat:access', getChatAccess(socket));
   socket.emit('chat:online', { count: chatOnlineCount });
   socket.emit('chat:history', chatMessages);
@@ -291,7 +293,7 @@ function broadcastChatOnline() {
     if (client.odlutUserId) connectedPlayers += 1;
   });
   const displayedCount = chatOnlineCount + connectedPlayers;
-  io.emit('chat:online', { count: displayedCount });
+  gameAudience(io).emit('chat:online', { count: displayedCount });
 }
 
 function seedChatMessages() {
@@ -456,7 +458,7 @@ function saveLocalSnapshot() {
     transactions,
     gameSettings,
     withdrawalPopupSettings,
-  }, null, 2);
+  });
   // The copied backend remains usable without MongoDB during local work. Keep
   // both local restoration sources current so admin edits survive a restart.
   fs.writeFileSync(STORE_FILE, payload);
@@ -1586,12 +1588,12 @@ function startRoomBettingPhase(roomId) {
     bettingStartedAt: room.bettingStartedAt
   };
 
-  io.emit('game:room:phase', phaseData);
-  io.emit('game:room:bets', { roomId, bets: room.activeBets });
+  gameAudience(io).emit('game:room:phase', phaseData);
+  gameAudience(io).emit('game:room:bets', { roomId, bets: room.activeBets });
 
   if (roomId === 1) {
-    io.emit('game:phase', phaseData);
-    io.emit('game:bets', room.activeBets);
+    gameAudience(io).emit('game:phase', phaseData);
+    gameAudience(io).emit('game:bets', room.activeBets);
   }
 
   if (room.bettingTimeout) clearTimeout(room.bettingTimeout);
@@ -1615,8 +1617,8 @@ function startRoomFlyingPhase(roomId) {
     flyingStartedAt: room.flyingStartedAt
   };
 
-  io.emit('game:room:phase', phaseData);
-  if (roomId === 1) io.emit('game:phase', phaseData);
+  gameAudience(io).emit('game:room:phase', phaseData);
+  if (roomId === 1) gameAudience(io).emit('game:phase', phaseData);
 
   if (room.loopInterval) clearInterval(room.loopInterval);
   room.loopInterval = setInterval(() => {
@@ -1625,8 +1627,8 @@ function startRoomFlyingPhase(roomId) {
     room.multiplier = room.multiplier + gameSettings.multiplierSpeed * room.multiplier;
     const emittedMultiplier = Math.floor(room.multiplier * 100) / 100;
 
-    io.emit('game:room:tick', { roomId, multiplier: emittedMultiplier });
-    if (roomId === 1) io.emit('game:tick', { multiplier: emittedMultiplier });
+    gameAudience(io).emit('game:room:tick', { roomId, multiplier: emittedMultiplier });
+    if (roomId === 1) legacyTickAudience(io).emit('game:tick', { multiplier: emittedMultiplier });
 
     // Bot auto-cashouts
     let betsChanged = false;
@@ -1640,8 +1642,8 @@ function startRoomFlyingPhase(roomId) {
     });
 
     if (betsChanged) {
-      io.emit('game:room:bets', { roomId, bets: room.activeBets });
-      if (roomId === 1) io.emit('game:bets', room.activeBets);
+      gameAudience(io).emit('game:room:bets', { roomId, bets: room.activeBets });
+      if (roomId === 1) gameAudience(io).emit('game:bets', room.activeBets);
     }
 
     if (emittedMultiplier >= room.crashPoint) {
@@ -1682,14 +1684,14 @@ function crashRoomGame(roomId) {
   }
 
   const crashData = { roomId, crashPoint, serverSeed: room.seedHash };
-  io.emit('game:room:crashed', crashData);
-  io.emit('game:room:bets', { roomId, bets: room.activeBets });
-  io.emit('game:room:history', { roomId, history: room.history });
+  gameAudience(io).emit('game:room:crashed', crashData);
+  gameAudience(io).emit('game:room:bets', { roomId, bets: room.activeBets });
+  gameAudience(io).emit('game:room:history', { roomId, history: room.history });
 
   if (roomId === 1) {
-    io.emit('game:crashed', crashData);
-    io.emit('game:bets', room.activeBets);
-    io.emit('game:history', room.history);
+    gameAudience(io).emit('game:crashed', crashData);
+    gameAudience(io).emit('game:bets', room.activeBets);
+    gameAudience(io).emit('game:history', room.history);
   }
 
   setTimeout(() => startRoomBettingPhase(roomId), 3500);
@@ -1720,20 +1722,22 @@ function authenticateGameSocket(socket, token) {
 }
 
 io.on('connection', (socket) => {
+  configureSocketAudience(socket);
   runtimeLog(`Client connected: ${socket.id}`);
 
   const handshakeUser = authenticateGameSocket(socket, socket.handshake?.auth?.token);
   if (handshakeUser) runtimeLog(`Authenticated: ${handshakeUser.username}`);
 
-  // Send legacy state (Room 1)
-  socket.emit('game:state', getRoomPublicState(rooms[1]));
-
-  // Send full multi-room state
-  socket.emit('game:rooms:state', {
-    1: getRoomPublicState(rooms[1]),
-    2: getRoomPublicState(rooms[2]),
-    3: getRoomPublicState(rooms[3])
-  });
+  // Presence sockets need account notifications, not game snapshots.
+  if (!socket.presenceOnly) {
+    // Send legacy state (Room 1) and full multi-room state.
+    socket.emit('game:state', getRoomPublicState(rooms[1]));
+    socket.emit('game:rooms:state', {
+      1: getRoomPublicState(rooms[1]),
+      2: getRoomPublicState(rooms[2]),
+      3: getRoomPublicState(rooms[3])
+    });
+  }
 
   // Always send payment config immediately on connect
   socket.emit('payment:config', paymentConfigPayload());
@@ -1801,8 +1805,8 @@ io.on('connection', (socket) => {
     socket.emit('bet:placed', { amount, balance: wallet.balance, betId, roomId });
     socket.emit('wallet:update', { balance: wallet.balance, depositCount: wallet.depositCount });
     socket.emit('chat:access', getChatAccess(socket));
-    io.emit('game:room:bets', { roomId, bets: room.activeBets });
-    if (roomId === 1) io.emit('game:bets', room.activeBets);
+    gameAudience(io).emit('game:room:bets', { roomId, bets: room.activeBets });
+    if (roomId === 1) gameAudience(io).emit('game:bets', room.activeBets);
   });
 
   socket.on('bet:cashout', (data = {}) => {
@@ -1841,8 +1845,8 @@ io.on('connection', (socket) => {
     });
     socket.emit('wallet:update', { balance: wallet.balance, depositCount: wallet.depositCount });
     socket.emit('chat:access', getChatAccess(socket));
-    io.emit('game:room:bets', { roomId, bets: room.activeBets });
-    if (roomId === 1) io.emit('game:bets', room.activeBets);
+    gameAudience(io).emit('game:room:bets', { roomId, bets: room.activeBets });
+    if (roomId === 1) gameAudience(io).emit('game:bets', room.activeBets);
   });
 
   socket.on('chat:send', (data) => {

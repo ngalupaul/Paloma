@@ -19,6 +19,7 @@ import { Subscription, finalize } from 'rxjs';
 import { ChatMessage, GameSocketService, LiveBetBroadcast, SourceGameBet } from '../../../core/services/game-socket.service';
 import { AuthService, User, TransactionRecord } from '../../../core/services/auth.service';
 import { GameSoundService } from '../../../core/services/game-sound.service';
+import { GameRuntimeService } from '../../../core/services/game-runtime.service';
 
 export type GameState = 'WAITING' | 'RUNNING' | 'CRASHED';
 
@@ -173,6 +174,7 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   private gameSound = inject(GameSoundService);
   private router = inject(Router);
   private location = inject(Location);
+  private runtime = inject(GameRuntimeService);
 
   private subs: Subscription[] = [];
   private animationFrameId: number | null = null;
@@ -180,6 +182,14 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   private mockLoopIntervalId: any = null;
   private resizeObserver: ResizeObserver | null = null;
   private fakeJoinIntervalId: any = null;
+  private lastCanvasFrameTime = 0;
+  private sunburstAngle = 0;
+  private referenceFlightProgress = 0;
+  private referenceCrashProgress = 0;
+  private referenceRoom = 0;
+  private referencePhase: GameState | null = null;
+  private crashStartedAt = 0;
+  private readonly crashExitDurationMs = 360;
   private raysRotation = 0;
   private lastRayFrameAt = performance.now();
   private planeRenderPosition = { x: 0, y: 0 };
@@ -577,6 +587,10 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngOnInit() {
+    if (!this.runtime.verifyIntegrity()) {
+      this.gameLoading.set(true);
+      return;
+    }
     this.initAuthAndSockets();
     this.seedMockBets();
     this.initUserBetHistory();
@@ -588,6 +602,9 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
+    if (!this.runtime.verifyIntegrity()) {
+      return;
+    }
     this.initCanvas();
     this.startCanvasRenderLoop();
   }
@@ -1825,25 +1842,9 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
       if (!assetContext) return;
 
       assetContext.drawImage(image, 0, 0);
-      const pixels = assetContext.getImageData(0, 0, asset.width, asset.height);
-      for (let index = 0; index < pixels.data.length; index += 4) {
-        const red = pixels.data[index];
-        const green = pixels.data[index + 1];
-        const blue = pixels.data[index + 2];
-        if (red > 245 && green > 245 && blue > 245) {
-          pixels.data[index + 3] = 0;
-        } else if (pixels.data[index + 3] > 0) {
-          // The reference sketch is monochrome SVG ink. Tint its remaining
-          // strokes after removing the paper-white export background.
-          pixels.data[index] = 255;
-          pixels.data[index + 1] = 29;
-          pixels.data[index + 2] = 77;
-        }
-      }
-      assetContext.putImageData(pixels, 0, 0);
       this.planeAsset = asset;
     };
-    image.src = 'assets/images/aviator-plane.svg';
+    image.src = 'assets/images/aviator-reference-plane.svg';
   }
 
   private resizeCanvas() {
@@ -1869,154 +1870,239 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private startCanvasRenderLoop = () => {
-    this.renderFrame();
+    this.renderFrame(performance.now());
     this.animationFrameId = requestAnimationFrame(this.startCanvasRenderLoop);
   };
 
-  private renderFrame() {
+  private renderFrame(frameTime: number) {
     if (!this.ctx || !this.canvasRef || !this.canvasContainerRef) return;
     const container = this.canvasContainerRef.nativeElement;
     const w = container.clientWidth;
     const h = container.clientHeight;
 
-    // Exact base from the supplied GameCanvasNew backdrop.
-    this.ctx.fillStyle = '#05070b';
+    const state = this.gameState();
+    const mult = this.currentMultiplier();
+    this.updateAnimatedMultiplier(mult, state);
+    // Rendering state is isolated from the server-driven room and betting state.
+    if (this.referenceRoom !== this.selectedRoom() || this.referencePhase !== state) {
+      if (state === 'WAITING' || this.referenceRoom !== this.selectedRoom()) this.referenceFlightProgress = 0;
+      if (state === 'CRASHED') {
+        this.referenceCrashProgress = this.referenceFlightProgress;
+        this.crashStartedAt = frameTime;
+      }
+      this.referenceRoom = this.selectedRoom();
+      this.referencePhase = state;
+    }
+
+    const elapsedMs = this.lastCanvasFrameTime
+      ? Math.min(60, frameTime - this.lastCanvasFrameTime)
+      : 16.67;
+    this.lastCanvasFrameTime = frameTime;
+    const dt = Math.min(0.06, elapsedMs / 1000);
+
+    // ─── SLOW, SMOOTH SUNBURST ROTATION (SPRIBE SILKY BACKGROUND FLOW) ─────
+    const rays = 12;
+    const rayAngle = (Math.PI / 2) / rays;
+    const rayCycle = rayAngle * 2;
+
+    if (state === 'RUNNING') {
+      // Gentle, slow graceful drift during flight
+      const flightSpeed = 0.045 + Math.min(0.04, (mult - 1) * 0.005);
+      this.sunburstAngle = (this.sunburstAngle + flightSpeed * dt) % rayCycle;
+    } else if (state === 'CRASHED') {
+      const crashSpeed = 0.035;
+      this.sunburstAngle = (this.sunburstAngle + crashSpeed * dt) % rayCycle;
+    } else {
+      // WAITING state: barely noticeable subtle idle drift
+      const idleSpeed = 0.018;
+      this.sunburstAngle = (this.sunburstAngle + idleSpeed * dt) % rayCycle;
+    }
+
+    // 1. Deep Solid Black Background
+    this.ctx.fillStyle = '#000000';
     this.ctx.fillRect(0, 0, w, h);
 
-    // 2. Draw Sunburst Radiating Fan Lines (rotates when plane is flying)
-    this.drawSunburstRays(w, h, this.gameState() === 'RUNNING');
+    // 2. Draw Moving Sunburst Radiating Fan Lines
+    this.drawSunburstRays(w, h, this.sunburstAngle, rayAngle);
 
-    const room = this.activeRoom();
-    const state = room.gameState();
-    const mult = this.updateAnimatedMultiplier(this.currentMultiplier(), state);
+    // 3. Ambient Flight Glow: Blue when < 2.00x (Image 1), Purple when >= 2.00x (Image 2)
+    this.drawFlightZoneGlow(w, h, mult, state, elapsedMs);
 
     if (state === 'RUNNING' || state === 'CRASHED') {
-      // Ported from the supplied canvas: the multiplier advances a power
-      // curve, giving the low sweeping takeoff and the lifted red graph.
-      if (state === 'CRASHED') {
-        // A short final glide continues beyond the graph's last live point.
-        // 1.08 intentionally extends the same curve beyond the board's
-        // upper-right corner, so the aircraft fully disappears on "Flew away".
-        const crashElapsed = Math.min(64, Math.max(0, performance.now() - this.lastPlaneFrameAt));
-        room.crashFlightProgress = Math.min(1.16, room.crashFlightProgress + crashElapsed * 0.00185);
-        room.flightProgress = room.crashFlightProgress;
-      } else {
-        room.flightProgress = Math.min(0.97, Math.max(0, 1 - 1 / Math.pow(Math.max(mult, 1), 1.55)));
-      }
-      const startX = Math.max(18, w * 0.02);
-      const startY = h - Math.max(20, h * 0.06);
-      const isMobileBoard = w <= 600;
-      const planeScale = isMobileBoard ? 0.9 : 1.22;
-      const tailOffset = (isMobileBoard ? 65 : 66) * planeScale;
-      let graphProgress = room.flightProgress;
+      const isMobileBoard = window.innerWidth <= 900;
+      const spriteScale = isMobileBoard ? Math.max(0.7, w * 0.225 / 95) : 1.5;
+
+      // ─── FLIGHT PROGRESS & SMOOTH INTERPOLATION (BETIKA / SPRIBE ULTRA-SMOOTH) ───
       if (state === 'RUNNING') {
-        const visiblePlaneCentre = w - (130 * planeScale * 0.56);
-        const maxEndX = Math.max(startX, visiblePlaneCentre - tailOffset);
-        graphProgress = Math.min(graphProgress, Math.max(0, (maxEndX - startX) / (w - startX * 2)));
+        const m = Math.max(1.00, mult);
+        // Presentation coordinates only; server multipliers and round timing are unchanged.
+        const climbP = 1 - Math.exp(-(m - 1) * (isMobileBoard ? 1.7 : 2.8));
+        const targetProgress = isMobileBoard
+            ? Math.min(0.92, Math.max(0.04, 0.09 + climbP * 0.90))
+            : Math.min(0.94, Math.max(0.04, 0.06 + climbP * 0.92));
+        const dt = Math.min(0.05, elapsedMs / 1000);
+        const smoothing = 1 - Math.exp(-dt * 5.5);
+        this.referenceFlightProgress += (targetProgress - this.referenceFlightProgress) * smoothing;
       }
-      const flightLift = state === 'RUNNING'
-        ? this.getFlightLift(isMobileBoard ? 9 : 14, room)
-        : 0;
-      const curveY = (progress: number) => (
-        startY - Math.pow(progress, 2.4) * h * 0.78 - flightLift * Math.min(1, progress * 1.5)
-      );
-      const targetX = startX + graphProgress * (w - startX * 2);
-      const targetY = curveY(graphProgress);
-      const endX = targetX;
-      const endY = targetY;
-      const graphGradient = this.ctx.createLinearGradient(0, startY, 0, 0);
-      graphGradient.addColorStop(0, 'rgba(130, 0, 18, 0.88)');
-      graphGradient.addColorStop(0.35, 'rgba(185, 10, 42, 0.72)');
-      graphGradient.addColorStop(1, 'rgba(255, 45, 96, 0.18)');
 
-      this.ctx.beginPath();
-      this.ctx.moveTo(startX, startY);
-      const curveSteps = isMobileBoard ? 80 : 120;
-      for (let step = 1; step <= Math.ceil(curveSteps * graphProgress); step++) {
-        const pointProgress = Math.min(graphProgress, step / curveSteps);
-        const pointX = startX + pointProgress * (w - startX * 2);
-        const pointY = curveY(pointProgress);
-        this.ctx.lineTo(pointX, pointY);
-      }
-      this.ctx.lineTo(endX, startY);
-      this.ctx.closePath();
-      this.ctx.fillStyle = graphGradient;
-      this.ctx.fill();
+      const p = state === 'CRASHED' ? this.referenceCrashProgress : this.referenceFlightProgress;
 
-      // Bright red graph line plus a low, broad glow like the supplied board.
-      this.ctx.beginPath();
-      this.ctx.moveTo(startX, startY);
-      for (let step = 1; step <= Math.ceil(curveSteps * graphProgress); step++) {
-        const pointProgress = Math.min(graphProgress, step / curveSteps);
-        this.ctx.lineTo(
-          startX + pointProgress * (w - startX * 2),
-          curveY(pointProgress),
-        );
-      }
-      this.ctx.strokeStyle = 'rgba(255, 29, 77, 0.38)';
-      this.ctx.lineWidth = 12;
-      this.ctx.lineCap = 'round';
-      this.ctx.stroke();
+      // ─── SAFE PLANE BOUNDS ──────────────────────────────────────────────────
+      const planeDrawW = 84 * spriteScale;
+      const planeDrawH = 46 * spriteScale;
+      const marginX = planeDrawW * 0.50;
+      const marginY = planeDrawH * 0.55;
 
-      this.ctx.beginPath();
-      this.ctx.moveTo(startX, startY);
-      for (let step = 1; step <= Math.ceil(curveSteps * graphProgress); step++) {
-        const pointProgress = Math.min(graphProgress, step / curveSteps);
-        this.ctx.lineTo(
-          startX + pointProgress * (w - startX * 2),
-          curveY(pointProgress),
-        );
-      }
-      this.ctx.strokeStyle = '#ff1d4d';
-      this.ctx.lineWidth = 4;
-      this.ctx.shadowColor = '#E11D48';
-      this.ctx.shadowBlur = 12;
-      this.ctx.stroke();
-      this.ctx.shadowBlur = 0;
+      const minX = marginX + (isMobileBoard ? 8 : 16);
+      const maxX = w - marginX - (isMobileBoard ? 10 : 20);
+      const maxY = h - marginY - 6;
+      const minY = marginY + (isMobileBoard ? 10 : 16);
 
-      // 6. Render the airplane at the curve tip without an exhaust trail.
+      const basePathX = minX + (maxX - minX) * p;
+      const verticalProgress = isMobileBoard
+        ? Math.min(0.97, p * 1.35) : Math.pow(p, 0.84);
+      const basePathY = maxY - (maxY - minY) * verticalProgress;
+
+      // Subtle, silky Spribe aerodynamic floating (frozen at crash start for a single clean exit path)
+      const flightTime = (state === 'CRASHED' && this.crashStartedAt ? this.crashStartedAt : frameTime) / 1000;
+      const waveX = Math.sin(flightTime * 0.9) * 3.5;
+      const waveY = Math.cos(flightTime * 1.1) * 5.0;
+
+      const planeX = Math.max(minX, Math.min(maxX, basePathX + waveX));
+      const planeY = Math.max(minY, Math.min(maxY, basePathY + waveY));
+
+      // Gentle dynamic pitch
+      const dynamicPitch = -0.045 + Math.sin(flightTime * 1.1) * 0.015;
+
+      // Exact rear-wheel / tail point of the airplane where the red trail connects
+      const tailX = planeX - planeDrawW * 0.40;
+      const tailY = planeY + planeDrawH * 0.16;
+
+      // Exponential Bezier control point anchored at the bottom
+      const ctrlX = tailX * 0.42;
+      const ctrlY = h;
+
+      // ─── 1 & 2. TRANSLUCENT RED TRAIL FILL & CURVE (ONLY DURING ACTIVE FLIGHT) ───
       if (state === 'RUNNING') {
-        const previousProgress = Math.max(0, graphProgress - 0.012);
-        const previousX = startX + previousProgress * (w - startX * 2);
-        const previousY = curveY(previousProgress);
-        const tangentAngle = Math.max(-0.32, Math.atan2(endY - previousY, endX - previousX));
-        // The graph joins the tail, not the middle of the plane sprite.
-        const planeTargetX = endX + Math.cos(tangentAngle) * tailOffset;
-        const planeTargetY = endY + Math.sin(tangentAngle) * tailOffset;
-        this.planeRenderPosition = { x: planeTargetX, y: planeTargetY };
-        this.planeRenderAngle = tangentAngle;
-        this.planeRenderReady = true;
-        this.drawAirplaneSprite(
-          planeTargetX,
-          planeTargetY,
-          this.planeRenderAngle,
-          planeScale,
-        );
+        const fill = this.ctx.createLinearGradient(0, tailY, 0, h);
+        fill.addColorStop(0, 'rgba(205, 0, 46, 0.55)');
+        fill.addColorStop(0.5, 'rgba(166, 0, 30, 0.62)');
+        fill.addColorStop(1, 'rgba(126, 0, 20, 0.72)');
+
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, h);
+        this.ctx.quadraticCurveTo(ctrlX, ctrlY, tailX, tailY);
+        this.ctx.lineTo(tailX, h); // Clean straight vertical drop to floor!
+        this.ctx.lineTo(0, h);     // Back along floor baseline
+        this.ctx.closePath();
+        this.ctx.fillStyle = fill;
+        this.ctx.fill();
+
+        // ─── VIBRANT GLOWING RED TRAIL CURVE ────────────────────────────────
+        this.ctx.beginPath();
+        this.ctx.moveTo(0, h);
+        this.ctx.quadraticCurveTo(ctrlX, ctrlY, tailX, tailY);
+        this.ctx.strokeStyle = '#ff0046';
+        this.ctx.lineWidth = 3.2;
+        this.ctx.shadowColor = '#e50914';
+        this.ctx.shadowBlur = 0;
+        this.ctx.stroke();
+        this.ctx.shadowBlur = 0;
+      }
+
+      // ─── 3. PLANE SPRITE (WITH NATURAL DYNAMIC PITCH & PROPELLER) ───────────
+      if (state === 'RUNNING') {
+        this.drawAirplaneSprite(planeX, planeY, dynamicPitch, spriteScale);
       } else if (state === 'CRASHED') {
-        const previousProgress = Math.max(0, graphProgress - 0.012);
-        const previousX = startX + previousProgress * (w - startX * 2);
-        const previousY = curveY(previousProgress);
-        const crashAngle = Math.max(-0.32, Math.atan2(endY - previousY, endX - previousX));
-        const planeFrameNow = performance.now();
-        const elapsed = Math.min(64, Math.max(0, planeFrameNow - this.lastPlaneFrameAt));
-        this.lastPlaneFrameAt = planeFrameNow;
-        const positionAlpha = 1 - Math.exp(-9 * (elapsed / 1000));
-        const planeTargetX = endX + Math.cos(crashAngle) * tailOffset;
-        const planeTargetY = endY + Math.sin(crashAngle) * tailOffset;
-        this.planeRenderPosition.x += (planeTargetX - this.planeRenderPosition.x) * positionAlpha;
-        this.planeRenderPosition.y += (planeTargetY - this.planeRenderPosition.y) * positionAlpha;
-        this.planeRenderAngle += (crashAngle - this.planeRenderAngle) * (1 - Math.exp(-6 * (elapsed / 1000)));
-        this.drawAirplaneSprite(this.planeRenderPosition.x, this.planeRenderPosition.y, this.planeRenderAngle, planeScale);
+        if (this.crashStartedAt > 0) {
+          const crashProgress = Math.max(0, Math.min(1, (frameTime - this.crashStartedAt) / this.crashExitDurationMs));
+          if (crashProgress < 1) {
+            const exitDistance = Math.pow(crashProgress, 1.35);
+            const exitDeltaX = Math.max(w * 0.60, w - planeX) + planeDrawW * 1.5;
+            const exitDeltaY = Math.max(h * 0.55, planeY) + planeDrawH * 1.5;
+            const crashedX = planeX + exitDeltaX * exitDistance;
+            const crashedY = planeY - exitDeltaY * exitDistance;
+            this.drawAirplaneSprite(crashedX, crashedY, -0.12 - crashProgress * 0.35, spriteScale);
+          }
+        }
       }
     } else {
-      // WAITING Phase - Idle plane parked at bottom-left ground area
-      this.planeRenderReady = false;
-      const isMobileBoard = w <= 600;
-      const now = Date.now();
-      const planeX = (isMobileBoard ? 52 : Math.max(70, w * 0.12)) + Math.sin(now / 220) * 4;
-      const planeY = h - (isMobileBoard ? 36 : 50) + Math.cos(now / 240) * 2;
-      this.drawAirplaneSprite(planeX, planeY, -0.08, isMobileBoard ? 1.02 : 1.35);
+      // WAITING Phase
     }
+  }
+
+  private drawSunburstRays(w: number, h: number, offsetAngle: number, rayAngle: number) {
+    if (!this.ctx) return;
+    this.ctx.save();
+    const maxDist = Math.hypot(w, h) * 1.8;
+
+    // Angle coverage from below horizontal baseline (-0.35 rad) to past vertical axis (PI/2 + 0.35 rad)
+    const minAngle = -0.35;
+    const maxAngle = Math.PI / 2 + 0.35;
+
+    const startIndex = Math.floor(minAngle / rayAngle) - 2;
+    const endIndex = Math.ceil(maxAngle / rayAngle) + 2;
+
+    for (let i = startIndex; i <= endIndex; i++) {
+      // Rotate clockwise / downward relative to bottom-left origin to simulate forward/upward flight
+      const a1 = i * rayAngle - offsetAngle;
+      const a2 = (i + 1) * rayAngle - offsetAngle;
+
+      this.ctx.beginPath();
+      this.ctx.moveTo(0, h);
+      this.ctx.lineTo(Math.cos(a1) * maxDist, h - Math.sin(a1) * maxDist);
+      this.ctx.lineTo(Math.cos(a2) * maxDist, h - Math.sin(a2) * maxDist);
+      this.ctx.closePath();
+
+      const isEven = Math.abs(i) % 2 === 0;
+      this.ctx.fillStyle = isEven
+        ? 'rgba(255, 255, 255, 0.04)'
+        : 'rgba(0, 0, 0, 0.35)';
+      this.ctx.fill();
+    }
+    this.ctx.restore();
+  }
+
+  private drawFlightZoneGlow(
+    w: number,
+    h: number,
+    multiplier: number,
+    state: GameState,
+    _elapsedMs: number
+  ) {
+    if (!this.ctx || state === 'WAITING' || state === 'CRASHED') return;
+
+    // Change only the flight backdrop at the displayed 2.00x threshold.
+    const purple = multiplier >= 2;
+    const r = purple ? 105 : 0;
+    const g = purple ? 43 : 145;
+    const b = purple ? 172 : 245;
+
+    // Designated focal center (behind the multiplier text & flight zone)
+    const cx = w * 0.50;
+    const cy = h * 0.44;
+
+    this.ctx.save();
+
+    // Stretch horizontally to match the wide spotlight beam in reference images
+    this.ctx.translate(cx, cy);
+    this.ctx.scale(1.35, 1.0);
+
+    const radius = Math.min(w * 0.38, h * 0.62);
+
+    const glow = this.ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+    glow.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.88)`);
+    glow.addColorStop(0.25, `rgba(${Math.round(r * 0.85)}, ${Math.round(g * 0.85)}, ${Math.round(b * 0.85)}, 0.65)`);
+    glow.addColorStop(0.52, `rgba(${Math.round(r * 0.55)}, ${Math.round(g * 0.55)}, ${Math.round(b * 0.55)}, 0.32)`);
+    glow.addColorStop(0.78, `rgba(${Math.round(r * 0.25)}, ${Math.round(g * 0.25)}, ${Math.round(b * 0.25)}, 0.08)`);
+    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    this.ctx.fillStyle = glow;
+    this.ctx.beginPath();
+    this.ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    this.ctx.restore();
   }
 
   private resetAnimatedMultiplier(value: number) {
@@ -2052,40 +2138,21 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.renderedMultiplierValue;
   }
 
-  private drawSunburstRays(w: number, h: number, isFlying = false) {
-    if (!this.ctx) return;
-    this.ctx.save();
-    this.ctx.translate(0, h);
-    const frameNow = performance.now();
-    const elapsed = Math.min(64, Math.max(0, frameNow - this.lastRayFrameAt));
-    this.lastRayFrameAt = frameNow;
-    if (isFlying) {
-      this.raysRotation = (this.raysRotation + elapsed * 0.00030) % (Math.PI * 2);
-    }
-    this.ctx.rotate(this.raysRotation);
-    const rayCount = w < 640 ? 32 : 44;
-    const radius = Math.sqrt(w * w + h * h) * 2.5;
-    const rayWidth = (Math.PI * 2) / rayCount;
-    for (let i = 0; i < rayCount; i++) {
-      const startAngle = i * rayWidth;
-      const endAngle = startAngle + rayWidth * 0.50;
-      this.ctx.beginPath();
-      this.ctx.moveTo(0, 0);
-      this.ctx.lineTo(Math.cos(startAngle) * radius, Math.sin(startAngle) * radius);
-      this.ctx.lineTo(Math.cos(endAngle) * radius, Math.sin(endAngle) * radius);
-      this.ctx.closePath();
-      this.ctx.fillStyle = i % 2 === 0 ? 'rgba(16, 18, 22, 0.45)' : 'rgba(3, 4, 6, 0.95)';
-      this.ctx.fill();
-    }
-    this.ctx.restore();
-  }
-
   private drawAirplaneSprite(x: number, y: number, angle: number, scale = 1.55) {
     if (!this.ctx) return;
     this.ctx.save();
     this.ctx.translate(x, y);
     this.ctx.rotate(angle);
     this.ctx.scale(scale, scale);
+
+    // Use LIGITOK's artwork without changing flight timing or game state.
+    if (this.planeAsset) {
+      const drawWidth = 95;
+      const drawHeight = drawWidth * this.planeAsset.height / this.planeAsset.width;
+      this.ctx.drawImage(this.planeAsset, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+      this.ctx.restore();
+      return;
+    }
 
     // Engine glow behind the tail.
     const glowGradient = this.ctx.createRadialGradient(-30, 0, 1, -30, 0, 22);
@@ -2095,14 +2162,6 @@ export class AviatorGameComponent implements OnInit, AfterViewInit, OnDestroy {
     this.ctx.beginPath();
     this.ctx.arc(-30, 0, 22, 0, Math.PI * 2);
     this.ctx.fill();
-
-    if (this.planeAsset) {
-      // The provided SVG is a square export, so crop it to the aircraft's
-      // bounds before placing it on the canvas flight path.
-      this.ctx.drawImage(this.planeAsset, 400, 400, 400, 230, -65, -38, 130, 75);
-      this.ctx.restore();
-      return;
-    }
 
     // Red single-prop airplane silhouette, matching the reference board.
     this.ctx.fillStyle = '#ed0042';

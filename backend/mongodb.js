@@ -1,5 +1,9 @@
 const { MongoClient } = require('mongodb');
 const dns = require('dns');
+const { createChangedRecordWriter } = require('./changed-records');
+const userWrites = createChangedRecordWriter('id');
+const walletWrites = createChangedRecordWriter('userId');
+const transactionWrites = createChangedRecordWriter('id');
 
 // Use Google/Cloudflare DNS to reliably resolve MongoDB Atlas SRV records on local networks
 try {
@@ -79,6 +83,9 @@ async function connect() {
 }
 
 async function disconnect() {
+  userWrites.clear();
+  walletWrites.clear();
+  transactionWrites.clear();
   if (client) {
     await client.close();
     client = null;
@@ -113,15 +120,26 @@ async function loadState() {
 async function bulkWriteTolerant(collection, operations, label) {
   try {
     await collection.bulkWrite(operations, { ordered: false });
+    return true;
   } catch (err) {
     const writeErrors = err?.writeErrors || err?.result?.writeErrors || [];
     if (writeErrors.length) {
       console.error(`${writeErrors.length} of ${operations.length} ${label} writes failed (rest succeeded):`,
         writeErrors.slice(0, 3).map((e) => e.errmsg || e.message).join(' | '));
+      return false;
     } else {
       throw err;
     }
   }
+}
+
+async function writeChanged(collection, tracker, records, key, label) {
+  return tracker.save(records, (changed) => bulkWriteTolerant(collection,
+    changed.map((data) => ({ updateOne: {
+      filter: { [key]: data[key] },
+      update: { $set: { ...data, updatedAt: new Date() } },
+      upsert: true,
+    } })), label));
 }
 
 async function saveState(users, wallets) {
@@ -139,37 +157,13 @@ async function saveState(users, wallets) {
       updatedAt: new Date(),
     }));
 
-    // Upsert users and wallets in a single round trip each, the same way
-    // saveTransactions already does below. A one-request-per-document loop
-    // here made every save take as long as the entire user base times a
-    // network round trip — with hundreds of users that stalled every admin
-    // action (and the deposit success/failure socket updates) for minutes.
-    // The two collections are independent, so write them concurrently
-    // instead of one after the other.
-    await Promise.all([
-      usersArray.length ? bulkWriteTolerant(usersCollection, usersArray.map((user) => {
-        const { _id, ...cleanUser } = user;
-        return {
-          updateOne: {
-            filter: { id: user.id },
-            update: { $set: { ...cleanUser, updatedAt: new Date() } },
-            upsert: true,
-          },
-        };
-      }), 'user') : null,
-      walletsArray.length ? bulkWriteTolerant(walletsCollection, walletsArray.map((wallet) => {
-        const { _id, ...cleanWallet } = wallet;
-        return {
-          updateOne: {
-            filter: { userId: wallet.userId },
-            update: { $set: cleanWallet },
-            upsert: true,
-          },
-        };
-      }), 'wallet') : null,
+    // Scan snapshots locally, but send only changed documents to MongoDB.
+    // The server's existing save queue preserves write ordering.
+    const results = await Promise.all([
+      writeChanged(usersCollection, userWrites, usersArray, 'id', 'user'),
+      writeChanged(walletsCollection, walletWrites, walletsArray, 'userId', 'wallet'),
     ]);
-
-    return true;
+    return results.every(Boolean);
   } catch (err) {
     console.error('Failed to save state to MongoDB:', err.message);
     return false;
@@ -225,17 +219,7 @@ async function saveTransactions(transactions) {
     const connected = await connect();
     if (!connected || !transactionsCollection) return false;
     if (!Array.isArray(transactions) || !transactions.length) return true;
-    await bulkWriteTolerant(transactionsCollection, transactions.map((transaction) => {
-      const { _id, ...cleanTx } = transaction;
-      return {
-        updateOne: {
-          filter: { id: transaction.id },
-          update: { $set: { ...cleanTx, updatedAt: new Date() } },
-          upsert: true,
-        },
-      };
-    }), 'transaction');
-    return true;
+    return await writeChanged(transactionsCollection, transactionWrites, transactions, 'id', 'transaction');
   } catch (err) {
     console.error('Failed to save transactions to MongoDB:', err.message);
     return false;
@@ -251,6 +235,7 @@ async function deleteAllTransactions() {
     const connected = await connect();
     if (!connected || !transactionsCollection) return false;
     await transactionsCollection.deleteMany({});
+    transactionWrites.clear();
     return true;
   } catch (err) {
     console.error('Failed to delete transactions from MongoDB:', err.message);

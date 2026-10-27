@@ -19,7 +19,7 @@ export class PresenceService {
     this.disconnect();
     this.token = token;
     this.socket = io(API_ORIGIN, {
-      auth: { token },
+      auth: { token, presenceOnly: true },
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,

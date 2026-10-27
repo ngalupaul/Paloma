@@ -1,5 +1,5 @@
 # Render Blueprint for Palpesabet: the Express + Socket.IO game server.
-# The Angular front end is hosted on Netlify (see netlify.toml).
+# The Angular frontend is hosted separately on Cloudflare Pages.
 # Deploy with: Render Dashboard -> New -> Blueprint -> pick this repo.
 # Values marked "sync: false" are secrets: Render prompts for them on first
 # deploy and never stores them in this file.
@@ -10,12 +10,17 @@ services:
     runtime: node
     plan: starter          # Do NOT use "free": free instances sleep, which drops
                            # the Socket.IO game loop and every live bet with it.
-    region: frankfurt      # Lowest latency Render region for Kenya.
+    region: frankfurt
+    numInstances: 1        # In-memory rounds require one authoritative process.
     rootDir: backend
-    buildCommand: npm ci
+    buildCommand: npm ci --omit=dev --no-audit --no-fund
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeploy: true
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
     envVars:
       - key: NODE_VERSION
         value: "22"

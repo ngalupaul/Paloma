@@ -1,64 +1,28 @@
-<div class="aviator-root dark-theme" [class.chat-open]="chatOpen()">
-
-  <!-- GAME LOADING SPLASH SCREEN -->
-  <div class="game-loading-splash" *ngIf="gameLoading()">
+<div id="aviator-board" class="aviator-root dark-theme reference-interface" [class.chat-open]="chatOpen()">
+  <div class="game-loading-splash" *ngIf="gameLoading()" role="status" aria-live="polite">
     <div class="splash-inner">
       <p class="splash-powered-label">POWERED BY</p>
-      <div class="splash-logo-row">
-        <div class="splash-logo-icon">
-          <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" fill="none">
-            <circle cx="24" cy="24" r="22" stroke="white" stroke-width="2" stroke-dasharray="4 3" opacity="0.6"/>
-            <circle cx="24" cy="24" r="14" stroke="white" stroke-width="1.5" stroke-dasharray="2 2" opacity="0.4"/>
-            <circle cx="24" cy="24" r="6" fill="white" opacity="0.8"/>
-          </svg>
-        </div>
-        <span class="splash-logo-name">SPRIBE</span>
-      </div>
-      <p class="splash-logo-tagline">INSIGHTFUL ENTERTAINMENT</p>
-      <div class="splash-dots">
-        <span class="dot"></span>
-        <span class="dot"></span>
-        <span class="dot"></span>
-      </div>
+      <div class="splash-logo-window"><img class="splash-reference-logo" src="/assets/images/aviator-loading-reference.png" alt="SPRIBE — Insightful Entertainment" /></div>
+      <div class="splash-dots"><span class="dot"></span><span class="dot"></span></div>
     </div>
   </div>
-
-  <!-- TOP NAVIGATION BAR -->
   <header class="top-nav">
-    <div class="nav-left">
+    <div class="top-nav-utility">
       <button class="go-back-btn" (click)="goBack()" title="Back to Dashboard">
         ‹ Go Back
       </button>
-      <div class="brand">
-        <span class="provably-fair-tag" (click)="openHistoryModal()" title="Provably Fair Game Engine">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: -2px; margin-right: 4px;"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
-          Provably Fair
-        </span>
-      </div>
+      <button class="fullscreen-top-btn" (click)="toggleFullscreen()" title="Toggle Fullscreen">
+        <span class="fs-text">View Fullscreen</span>
+        <svg class="fs-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      </button>
     </div>
 
-    <div class="nav-actions">
-      <div class="balance-badge" (click)="openWalletPage()">
-        <span class="balance-label">WALLET</span>
-        <span class="balance-amount">{{ userBalance() | number:'1.2-2' }} KES</span>
-      </div>
 
-      <div class="wallet-actions">
-        <button class="wallet-route-btn" (click)="openDepositFromProfile()">Deposit</button>
-      </div>
-
-      <!-- PROFILE DROPDOWN TRIGGER -->
-      <div class="profile-dropdown-wrap" id="profileDropdownWrap">
-        <button class="profile-btn"
-                (click)="toggleProfileDropdown()"
-                title="Open menu"
-                [attr.aria-expanded]="showProfileDropdown()">
-          <span class="hamburger-icon" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="sr-only">Open menu</span>
-        </button>
-
-        <!-- DROPDOWN MENU -->
-        <div class="profile-dropdown-menu" *ngIf="showProfileDropdown()">
+    <div class="game-brand-bar"><div class="nav-actions">
+      <div class="balance-badge" (click)="openWalletModal()" title="Wallet Balance"><span class="balance-amount">{{ userBalance() | number:'1.2-2' }}<span class="balance-currency"> KES</span></span></div>
+      <div class="game-menu-wrap" id="profileDropdownWrap">
+        <button type="button" class="header-game-menu-btn" (click)="toggleProfileDropdown()" [attr.aria-expanded]="showProfileDropdown()" aria-label="Open game options"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14"/></svg></button>
+        <div class="profile-dropdown-menu spribe-dropdown-menu" *ngIf="showProfileDropdown()">
           <div class="profile-dropdown-header">
             <span class="pdh-avatar">{{ currentUser()?.username?.charAt(0)?.toUpperCase() || 'P' }}</span>
             <div class="pdh-info">
@@ -66,7 +30,7 @@
               <span class="pdh-balance">{{ userBalance() | number:'1.2-2' }} KES</span>
             </div>
           </div>
-          <div class="profile-dropdown-divider"></div>
+          <div class="room-selector menu-room-selector"><button *ngFor="let room of [1, 2, 3]" [class.active]="selectedRoom() === room" (click)="openChangeRoomModal(room); closeProfileDropdown()">Room #{{ room }}</button></div><div class="profile-dropdown-divider"></div>
           <button *ngIf="currentUser()?.role === 'admin' || currentUser()?.role === 'superadmin'" class="pdm-item admin-item" (click)="navigateToAdmin()">
             <span class="pdm-icon">⚡</span> {{ currentUser()?.role === 'superadmin' ? 'Superadmin Dashboard' : 'Admin Dashboard' }}
           </button>
@@ -97,74 +61,46 @@
         </div>
       </div>
 
-      <button class="chat-toggle-btn" type="button" (click)="toggleChat()" [class.active]="chatOpen()"
-              title="Open Palpesabet live chat" [attr.aria-expanded]="chatOpen()">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M20 11.25a7.5 7.5 0 0 1-8 7.47A7.9 7.9 0 0 1 8.72 18L4.5 19.5 6 15.28A7.9 7.9 0 0 1 5.28 12 7.5 7.5 0 0 1 12.75 4.5 7.5 7.5 0 0 1 20 11.25Z" />
-        </svg>
-        <span class="sr-only">Open Palpesabet live chat</span>
-      </button>
 
-      <button class="nav-icon-btn" (click)="toggleFullscreen()" title="Toggle Fullscreen">
-        ⛶
-      </button>
-    </div>
+      <button class="chat-header-btn" type="button" (click)="toggleChat()" [attr.aria-expanded]="chatOpen()" aria-label="Toggle chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 11.25a7.5 7.5 0 0 1-8 7.47A7.9 7.9 0 0 1 8.72 18L4.5 19.5 6 15.28A7.9 7.9 0 0 1 5.28 12 7.5 7.5 0 0 1 12.75 4.5 7.5 7.5 0 0 1 20 11.25Z"/></svg></button>
+    </div></div>
   </header>
-
-  <!-- MAIN LAYOUT (SIDEBAR + GAME VIEWPORT + CHAT DRAWER) -->
-  <div class="main-layout" [class.chat-open]="chatOpen()">
-    <!-- LEFT SIDEBAR: LIVE BETS FEED -->
+  <div class="main-layout">
+    <!-- LEFT SIDEBAR: LIVE BETS / PEOPLE BETTING FEED (Hidden in Sanitized Mode) -->
     <aside class="left-sidebar glass-card">
       <div class="bets-tabs">
-        <button [class.active]="activeTab() === 'all'" (click)="activeTab.set('all')">All Places</button>
+        <button [class.active]="activeTab() === 'all'" (click)="activeTab.set('all')">All Bets</button>
         <button [class.active]="activeTab() === 'my'" (click)="activeTab.set('my')">Previous</button>
         <button [class.active]="activeTab() === 'top'" (click)="activeTab.set('top')">Top</button>
       </div>
 
-      <div class="bets-header-info">
-        <div class="bets-header-text">
-          <span class="bets-title">
-            {{ activeTab() === 'all' ? 'ALL PLACES' : (activeTab() === 'my' ? 'PREVIOUS' : 'TOP') }}
-          </span>
-          <span class="bets-count">{{ betsCount() }}</span>
-        </div>
-      </div>
+      <div class="bets-header-info"><span class="bets-count"><span>{{ activeTab() === 'my' ? 'PREVIOUS BETS' : (activeTab() === 'top' ? 'TOP BETS' : 'ALL BETS') }}</span><b>{{ betsCount() }}</b></span></div>
 
       <div class="bets-table-header">
         <span class="col-player">Player</span>
-        <span class="col-bet text-right">Place KES</span>
+        <span class="col-bet text-right">Bet KES</span>
         <span class="col-mult text-center">X</span>
         <span class="col-win text-right">Win KES</span>
       </div>
 
       <div class="bets-list">
-        <div *ngFor="let item of displayBetsList()" 
-             class="bet-row" 
-             [class.cashed-out]="item.cashedOut" 
+        <div *ngFor="let item of displayBetsList()"
+             class="bet-row"
+             [class.cashed-out]="item.cashedOut"
              [class.my-bet]="item.isCurrentUser">
           <span class="col-player player-name">
-            <span class="user-avatar-wrap">
-              <img *ngIf="item.avatarIcon.includes('.svg') || item.avatarIcon.includes('.png') || item.avatarIcon.includes('/')" 
-                   [src]="item.avatarIcon" 
-                   class="user-avatar-img" 
-                   [alt]="item.player" 
-                   loading="lazy" />
-              <span *ngIf="!item.avatarIcon.includes('.svg') && !item.avatarIcon.includes('.png') && !item.avatarIcon.includes('/')" 
-                    class="user-avatar-fallback">{{ item.avatarIcon }}</span>
-            </span>
-            <span class="name-text">{{ item.player }}</span>
+            <span class="user-avatar-icon"><img *ngIf="item.avatarIcon.includes('/')" [src]="item.avatarIcon" [alt]="item.player" /><span *ngIf="!item.avatarIcon.includes('/')">{{ item.avatarIcon }}</span></span>
+            {{ item.player }}
           </span>
           <span class="col-bet text-right">{{ item.bet | number:'1.2-2' }}</span>
           <span class="col-mult text-center">
-            <span *ngIf="item.cashedOut && item.multiplier" 
-                  class="mult-badge"
-                  [class.mult-blue]="item.multiplier < 2.0"
-                  [class.mult-purple]="item.multiplier >= 2.0">
+            <span *ngIf="item.multiplier" class="mult-badge" [class.high-win]="item.multiplier >= 10">
               {{ item.multiplier | number:'1.2-2' }}x
             </span>
+            <span *ngIf="!item.multiplier" class="waiting-dash">-</span>
           </span>
           <span class="col-win text-right win-amount">
-            <span *ngIf="item.cashedOut && item.win > 0">{{ item.win | number:'1.2-2' }}</span>
+            {{ item.cashedOut && item.win > 0 ? (item.win | number:'1.2-2') : '' }}
           </span>
         </div>
       </div>
@@ -181,40 +117,26 @@
     <main class="game-area">
       <!-- LIVE TOURNAMENT BANNER -->
       <div class="live-banner">
-        <span class="live-dot">🟢 LIVE</span>
+        <span class="tournament-status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16M8 2v4M16 2v4M8 12h2m4 0h2m-8 4h2m4 0h2"/></svg>UPCOMING</span>
         <span class="banner-text">Mfalme Wa Anga KES 400,000 Daily Crown</span>
-        <span class="connection-status" [class.online]="isConnected()">
-          {{ isConnected() ? 'Socket Connected' : 'Reconnecting...' }}
-        </span>
+        <span class="tournament-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></span>
       </div>
 
       <!-- ROOM SWITCHER & MULTIPLIER HISTORY BAR -->
       <div class="history-bar-container glass-card">
-        <div class="room-selector">
-          <button [class.active]="selectedRoom() === 1" (click)="openChangeRoomModal(1)">
-            <span class="room-close" (click)="$event.stopPropagation(); openChangeRoomModal(1)" aria-hidden="true">×</span> Room #1
-          </button>
-          <button [class.active]="selectedRoom() === 2" (click)="openChangeRoomModal(2)">
-            <span class="room-close" (click)="$event.stopPropagation(); openChangeRoomModal(2)" aria-hidden="true">×</span> Room #2
-          </button>
-          <button [class.active]="selectedRoom() === 3" (click)="openChangeRoomModal(3)">
-            <span class="room-close" (click)="$event.stopPropagation(); openChangeRoomModal(3)" aria-hidden="true">×</span> Room #3
-          </button>
-        </div>
 
-        <div class="multiplier-ribbon">
-          <div *ngFor="let mult of history()" 
-               class="mult-pill" 
-               [class.low]="mult < 2.0" 
-               [class.mid]="mult >= 2.0 && mult < 10.0" 
+
+        <div class="multiplier-ribbon" role="list" tabindex="0" aria-label="Recent rounds, newest first. Scroll left for older rounds.">
+          <div *ngFor="let mult of history()"
+               class="mult-pill" role="listitem"
+               [class.low]="mult < 2.0"
+               [class.mid]="mult >= 2.0 && mult < 10.0"
                [class.high]="mult >= 10.0">
             {{ mult | number:'1.2-2' }}x
           </div>
         </div>
 
-        <button class="more-ribbon-btn" (click)="openHistoryModal()" title="View full history">
-          📜 History
-        </button>
+        <button type="button" class="more-ribbon-btn" (click)="openHistoryModal()" aria-label="Open round history" title="Round history">•••</button>
       </div>
 
       <!-- CANVAS FLIGHT VIEWPORT -->
@@ -227,34 +149,105 @@
           <div *ngIf="gameState() === 'WAITING'" class="stage-overlay waiting">
             <div class="partner-branding-box">
               <div class="ufc-partner-badge">
-                <span class="ufc-title">UFC</span>
-                <span class="divider">|</span>
-                <span class="aviator-title">Aviator</span>
+                <div class="ufc-logo-wrap">
+                  <img class="ufc-reference-logo" src="/assets/images/aviator-partner-ufc.svg" alt="UFC" />
+
+                </div>
+                <div class="vertical-divider"></div>
+                <div class="aviator-title-wrap">
+                  <img src="/assets/images/aviator-partner-plane.svg" class="waiting-plane-logo" alt="Aviator Plane" />
+                  <span class="aviator-title">Aviator</span>
+                </div>
               </div>
+
               <div class="partner-subtitle">OFFICIAL PARTNERS</div>
-              <div class="red-line-countdown-wrap">
-                <div class="red-line-countdown" [style.width.%]="countdownProgress()"></div>
+
+              <!-- RED LINE PROGRESS COUNTDOWN REDUCING TO THE LEFT -->
+              <div class="waiting-progress-track">
+                <div class="waiting-progress-fill" [style.width.%]="countdownProgress()"></div>
               </div>
+
+              <!-- SPRIBE BADGE WITH EXACT DOTTED S LOGO, OFFICIAL GAME CHECKMARK, AND SINCE 2019 -->
               <div class="spribe-cert-badge">
-                <span class="cert-title">🎮 SPRIBE</span>
-                <span class="cert-status">Official Game ✔</span>
+                <div class="cert-header">
+                  <!-- Exact Spribe Dotted Matrix Icon -->
+                  <svg class="spribe-logo-icon" viewBox="0 0 40 40" fill="#ffffff">
+                    <circle cx="20" cy="5" r="1.2" opacity="0.6"/>
+                    <circle cx="16" cy="6" r="1.3" opacity="0.7"/>
+                    <circle cx="24" cy="6" r="1.3" opacity="0.7"/>
+                    <circle cx="13" cy="8" r="1.4" opacity="0.8"/>
+                    <circle cx="27" cy="8" r="1.4" opacity="0.8"/>
+                    <circle cx="10" cy="11" r="1.5" opacity="0.9"/>
+                    <circle cx="14" cy="11" r="1.9"/>
+                    <circle cx="18" cy="10" r="2.1"/>
+                    <circle cx="22" cy="10" r="2.1"/>
+                    <circle cx="26" cy="11" r="1.7"/>
+                    <circle cx="30" cy="11" r="1.4" opacity="0.8"/>
+                    <circle cx="8" cy="15" r="1.5" opacity="0.8"/>
+                    <circle cx="12" cy="14" r="2.2"/>
+                    <circle cx="16" cy="14" r="2.2"/>
+                    <circle cx="20" cy="14" r="1.8"/>
+                    <circle cx="24" cy="14" r="1.2" opacity="0.5"/>
+                    <circle cx="28" cy="15" r="1.1" opacity="0.4"/>
+                    <circle cx="32" cy="15" r="1.0" opacity="0.3"/>
+                    <circle cx="7" cy="20" r="1.6" opacity="0.9"/>
+                    <circle cx="11" cy="19" r="2.2"/>
+                    <circle cx="15" cy="19" r="2.2"/>
+                    <circle cx="20" cy="20" r="2.2"/>
+                    <circle cx="25" cy="21" r="2.2"/>
+                    <circle cx="29" cy="21" r="2.2"/>
+                    <circle cx="33" cy="20" r="1.6" opacity="0.9"/>
+                    <circle cx="8" cy="25" r="1.0" opacity="0.3"/>
+                    <circle cx="12" cy="25" r="1.1" opacity="0.4"/>
+                    <circle cx="16" cy="26" r="1.2" opacity="0.5"/>
+                    <circle cx="20" cy="26" r="1.8"/>
+                    <circle cx="24" cy="26" r="2.2"/>
+                    <circle cx="28" cy="26" r="2.2"/>
+                    <circle cx="32" cy="25" r="1.5" opacity="0.8"/>
+                    <circle cx="10" cy="29" r="1.4" opacity="0.8"/>
+                    <circle cx="14" cy="29" r="1.7"/>
+                    <circle cx="18" cy="30" r="2.1"/>
+                    <circle cx="22" cy="30" r="2.1"/>
+                    <circle cx="26" cy="29" r="1.9"/>
+                    <circle cx="30" cy="29" r="1.5" opacity="0.9"/>
+                    <circle cx="13" cy="32" r="1.4" opacity="0.8"/>
+                    <circle cx="27" cy="32" r="1.4" opacity="0.8"/>
+                    <circle cx="16" cy="34" r="1.3" opacity="0.7"/>
+                    <circle cx="24" cy="34" r="1.3" opacity="0.7"/>
+                    <circle cx="20" cy="35" r="1.2" opacity="0.6"/>
+                  </svg>
+                  <span class="cert-title">SPRIBE</span>
+                </div>
+                <div class="cert-status-pill">
+                  <span class="cert-status-text">Official Game</span>
+                  <span class="spribe-check-circle">
+                    <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  </span>
+                </div>
+                <span class="cert-since">Since 2019</span>
+              </div>
+            </div>
+
+            <div class="betting-countdown-box">
+              <div class="loader-spinner"></div>
+              <h2 class="betting-title">WAITING FOR NEXT ROUND</h2>
+              <div class="countdown-timer">{{ countdownSeconds() }}s</div>
+              <div class="progress-bar">
+                <div class="progress-fill" [style.width.%]="countdownProgress()"></div>
               </div>
             </div>
           </div>
 
           <!-- 2. RUNNING FLIGHT STAGE -->
           <div *ngIf="gameState() === 'RUNNING'" class="stage-overlay running">
-            <h1 class="live-multiplier-display"
-                [class.mult-blue]="animatedMultiplier() < 2.0"
-                [class.mult-purple]="animatedMultiplier() >= 2.0 && animatedMultiplier() < 10.0"
-                [class.mult-pink]="animatedMultiplier() >= 10.0">
-              {{ animatedMultiplier() | number:'1.2-2' }}x
-            </h1>
+            <h1 class="live-multiplier-display">{{ animatedMultiplier() | number:'1.2-2' }}x</h1>
           </div>
 
-          <!-- 3. CRASHED ("FLEW AWAY!") STAGE -->
+          <!-- 3. CRASHED STAGE -->
           <div *ngIf="gameState() === 'CRASHED'" class="stage-overlay crashed">
-            <h2 class="flew-away-text">FLEW AWAY!</h2>
+            <p class="flew-away-text">FLEW AWAY!</p>
             <h1 class="crashed-multiplier-display">{{ finalCrashMultiplier() | number:'1.2-2' }}x</h1>
           </div>
 
@@ -275,7 +268,7 @@
         <div class="bet-panel-box glass-card" [class.panel-active]="panel1().hasActiveBet" [class.auto-mode]="panel1().mode === 'auto'">
           <div class="panel-header-row">
             <div class="panel-subtabs" [class.auto-mode]="panel1().mode === 'auto'">
-              <button type="button" [class.active]="panel1().mode === 'bet'" (click)="setPanelMode(1, 'bet')">Place</button>
+              <button type="button" [class.active]="panel1().mode === 'bet'" (click)="setPanelMode(1, 'bet')">Bet</button>
               <button type="button" [class.active]="panel1().mode === 'auto'" (click)="setPanelMode(1, 'auto')">Auto</button>
             </div>
           </div>
@@ -312,7 +305,7 @@
                       class="big-bet-btn green" 
                       [disabled]="panel1().isPending" 
                       (click)="placeBet(1)">
-                <span class="btn-title">{{ panel1().isPending ? 'Placing...' : 'Place' }}</span>
+                <span class="btn-title">{{ panel1().isPending ? 'Placing...' : 'BET' }}</span>
                 <span class="btn-sub">{{ panel1().amount | number:'1.2-2' }} KES</span>
               </button>
 
@@ -344,7 +337,7 @@
               <button *ngIf="(gameState() === 'RUNNING' || gameState() === 'CRASHED') && panel1().hasCashedOut && !panel1().queuedAmount"
                       class="big-bet-btn green"
                       (click)="queueBet(1)">
-                <span class="btn-title">Place</span>
+                <span class="btn-title">BET</span>
                 <span class="btn-sub">{{ panel1().amount | number:'1.2-2' }} KES</span>
               </button>
 
@@ -352,7 +345,7 @@
               <button *ngIf="(gameState() === 'RUNNING' || gameState() === 'CRASHED') && !panel1().hasActiveBet && !panel1().hasCashedOut && !panel1().queuedAmount"
                       class="big-bet-btn green"
                       (click)="queueBet(1)">
-                <span class="btn-title">Place</span>
+                <span class="btn-title">BET</span>
                 <span class="btn-sub">{{ panel1().amount | number:'1.2-2' }} KES</span>
               </button>
             </div>
@@ -397,7 +390,7 @@
         <div class="bet-panel-box glass-card" *ngIf="!panel2Collapsed()" [class.panel-active]="panel2().hasActiveBet" [class.auto-mode]="panel2().mode === 'auto'">
           <div class="panel-header-row">
             <div class="panel-subtabs" [class.auto-mode]="panel2().mode === 'auto'">
-              <button type="button" [class.active]="panel2().mode === 'bet'" (click)="setPanelMode(2, 'bet')">Place</button>
+              <button type="button" [class.active]="panel2().mode === 'bet'" (click)="setPanelMode(2, 'bet')">Bet</button>
               <button type="button" [class.active]="panel2().mode === 'auto'" (click)="setPanelMode(2, 'auto')">Auto</button>
             </div>
             <button type="button" class="panel-collapse-btn" (click)="togglePanel2()" title="Minimize panel 2" aria-label="Minimize panel 2">
@@ -437,7 +430,7 @@
                       class="big-bet-btn green" 
                       [disabled]="panel2().isPending" 
                       (click)="placeBet(2)">
-                <span class="btn-title">{{ panel2().isPending ? 'Placing...' : 'Place' }}</span>
+                <span class="btn-title">{{ panel2().isPending ? 'Placing...' : 'BET' }}</span>
                 <span class="btn-sub">{{ panel2().amount | number:'1.2-2' }} KES</span>
               </button>
 
@@ -469,7 +462,7 @@
               <button *ngIf="(gameState() === 'RUNNING' || gameState() === 'CRASHED') && panel2().hasCashedOut && !panel2().queuedAmount"
                       class="big-bet-btn green"
                       (click)="queueBet(2)">
-                <span class="btn-title">Place</span>
+                <span class="btn-title">BET</span>
                 <span class="btn-sub">{{ panel2().amount | number:'1.2-2' }} KES</span>
               </button>
 
@@ -477,7 +470,7 @@
               <button *ngIf="(gameState() === 'RUNNING' || gameState() === 'CRASHED') && !panel2().hasActiveBet && !panel2().hasCashedOut && !panel2().queuedAmount"
                       class="big-bet-btn green"
                       (click)="queueBet(2)">
-                <span class="btn-title">Place</span>
+                <span class="btn-title">BET</span>
                 <span class="btn-sub">{{ panel2().amount | number:'1.2-2' }} KES</span>
               </button>
             </div>
@@ -526,9 +519,9 @@
     </main>
 
     <!-- RIGHT CHAT DRAWER (DOCKED AS 3RD COLUMN) -->
-    <aside class="chat-drawer" *ngIf="chatOpen()" aria-label="Palpesabet live chat">
+    <aside class="chat-right-panel" *ngIf="chatOpen()" aria-label="Palpesabet live chat">
       <!-- Top bar on mobile mode matching image -->
-      <div class="chat-mobile-top-bar">
+      <div class="chat-utility-bar">
         <button type="button" class="chat-mobile-back-btn" (click)="closeChat()">
           <span class="back-arrow">‹</span> Go Back
         </button>
@@ -539,14 +532,14 @@
 
       <!-- Floating chat card header container (matches screenshot) -->
       <div class="chat-header-card">
-        <div class="chat-drawer-header">
+        <div class="chat-header-bar">
           <button type="button" class="chat-info-btn" title="Chat information" aria-label="Chat information">i</button>
-          <div class="chat-online-label">Online: <strong>{{ chatOnlineCount() | number:'1.0-0' }}</strong></div>
+          <div class="chat-online-pill"><span class="online-label">Online:</span> <strong class="online-count">{{ chatOnlineCount() | number:'1.0-0' }}</strong></div>
           <button type="button" class="chat-close-btn" (click)="closeChat()" title="Close chat" aria-label="Close chat">✕</button>
         </div>
       </div>
 
-      <div class="chat-message-list"
+      <div class="chat-messages-container"
            #chatScroll
            (scroll)="onChatScroll()"
            (pointerdown)="onChatPointerDown()"
@@ -562,18 +555,18 @@
           </div>
 
           <!-- Normal / User message -->
-          <div *ngIf="!message.isRestrictionNotice" class="chat-message-row" [class.own]="isOwnChatMessage(message)">
-            <img class="chat-avatar" [src]="message.avatar || 'assets/avatars/avatar-pilot.svg'" [alt]="message.username">
-            <div class="chat-message-bubble">
-              <div class="chat-message-meta">
+          <div *ngIf="!message.isRestrictionNotice" class="chat-message-row" [class.is-self]="isOwnChatMessage(message)">
+            <img class="chat-user-avatar" [src]="message.avatar || 'assets/avatars/avatar-pilot.svg'" [alt]="message.username">
+            <div class="chat-bubble">
+              <div class="bubble-header">
                 <span class="chat-username" [style.color]="isOwnChatMessage(message) ? '#4ade80' : getChatUsernameColor(message.username)">{{ message.username }}</span>
                 <span class="chat-time">{{ formatChatTime(message.timestamp) }}</span>
               </div>
-              <div class="chat-message-text">{{ message.text }}</div>
+              <div class="chat-text">{{ message.text }}</div>
             </div>
             <button type="button" class="chat-like-btn" (click)="toggleLikeMessage(message)" aria-label="Like message">
               <span class="heart-icon">♥</span>
-              <span class="likes-count" *ngIf="(message.likes || 0) > 0">{{ message.likes }}</span>
+              <span class="like-count" *ngIf="(message.likes || 0) > 0">{{ message.likes }}</span>
             </button>
           </div>
         </ng-container>
