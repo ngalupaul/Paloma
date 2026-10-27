@@ -1,0 +1,37 @@
+<article class="stat-card payhero-card"
+  [class.balance-safe]="payHeroBalance !== null && payHeroBalance >= 200"
+  [class.balance-warning]="payHeroBalance !== null && payHeroBalance >= 100 && payHeroBalance < 200"
+  [class.balance-danger]="payHeroBalance !== null && payHeroBalance < 100"
+  [class.balance-unavailable]="!!payHeroError"
+  aria-label="PayHero service-token balance">
+  <div class="stat-card-top">
+    <span class="stat-label">PayHero service tokens</span>
+    <span class="stat-icon-wrapper"
+      [class.icon-safe]="payHeroBalance !== null && payHeroBalance >= 200"
+      [class.icon-warning]="payHeroBalance !== null && payHeroBalance >= 100 && payHeroBalance < 200"
+      [class.icon-danger]="payHeroBalance !== null && payHeroBalance < 100">
+      <button type="button" class="micro-refresh-btn" (click)="fetchPayHeroBalance(true)" title="Refresh PayHero service tokens" [disabled]="isLoadingPayHeroBalance" aria-label="Refresh PayHero service tokens">
+        <svg class="refresh-icon" [class.spinning]="isLoadingPayHeroBalance" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+      </button>
+    </span>
+  </div>
+  <strong class="stat-val payhero-balance-val"
+    [class.text-green]="payHeroBalance !== null && payHeroBalance >= 200"
+    [class.text-yellow]="payHeroBalance !== null && payHeroBalance >= 100 && payHeroBalance < 200"
+    [class.text-red]="payHeroBalance !== null && payHeroBalance < 100">
+    <span class="stat-currency">Tokens</span>{{ payHeroBalance !== null ? (payHeroBalance | number:'1.2-2') : 'Unavailable' }}
+  </strong>
+  <div class="stat-card-footer payhero-status" role="status">
+    <span class="payhero-status-pill"
+      [class.pill-green]="payHeroBalance !== null && payHeroBalance >= 200"
+      [class.pill-yellow]="payHeroBalance !== null && payHeroBalance >= 100 && payHeroBalance < 200"
+      [class.pill-red]="payHeroBalance !== null && payHeroBalance < 100">
+      {{ isLoadingPayHeroBalance ? 'Checking PayHero...' : (payHeroError ? 'Balance unavailable' : (payHeroBalance !== null && payHeroBalance >= 200 ? 'Sufficient Tokens (>= 200)' : (payHeroBalance !== null && payHeroBalance >= 100 ? 'Low Tokens (< 200) - Consider Top Up' : (payHeroBalance !== null ? 'CRITICAL: Tokens Below 100! Top Up Now' : 'Available service tokens')))) }}
+    </span>
+    <span class="stat-footnote" *ngIf="payHeroLastUpdated" [title]="payHeroLastUpdated">Checked {{ payHeroLastUpdated | date:'HH:mm:ss':'+0300' }} EAT</span>
+  </div>
+  <p class="payhero-account" *ngIf="payHeroAccountId !== null">PayHero account {{ payHeroAccountId }}</p>
+  <p class="payhero-error" *ngIf="payHeroError">{{ payHeroError }}</p>
+</article>

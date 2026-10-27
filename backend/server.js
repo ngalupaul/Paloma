@@ -2874,6 +2874,26 @@ app.post('/api/admin/transactions/:id/recheck', requireAdmin, async (req, res) =
   }
 });
 
+// Share a short cache and in-flight request across admin tabs to limit provider traffic.
+const fetchPayHeroBalance = require('./payhero-balance').createPayHeroBalanceFetcher();
+let payHeroBalanceCache = null;
+let payHeroBalanceCacheTime = 0;
+let payHeroBalanceRequest = null;
+app.get('/api/admin/payhero/balance', requireAdmin, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (req.query.force !== 'true' && payHeroBalanceCache && Date.now() - payHeroBalanceCacheTime < 15000) {
+    return res.json(payHeroBalanceCache);
+  }
+  if (!payHeroBalanceRequest) {
+    payHeroBalanceRequest = fetchPayHeroBalance().then(result => {
+      payHeroBalanceCache = result.error ? null : result;
+      payHeroBalanceCacheTime = Date.now();
+      return result;
+    }).finally(() => { payHeroBalanceRequest = null; });
+  }
+  return res.json(await payHeroBalanceRequest);
+});
+
 app.get('/api/admin/stats', requireAdmin, (req, res) => {
   const onlineUsers = new Set(
     Array.from(io.sockets.sockets.values()).map((socket) => socket.odlutUserId).filter(Boolean)

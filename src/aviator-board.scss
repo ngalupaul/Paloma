@@ -29,3 +29,9 @@
 }
 
 body:has(#aviator-board.reference-interface) .install-prompt { display: none; }
+
+#aviator-board.reference-interface .spribe-dropdown-menu {
+  .spribe-toggle-row { width:100%; border:0; background:transparent; font:inherit; }
+  .toggle-icon svg, .spribe-footer-btn svg { width:16px; height:16px; }
+  .spribe-menu-btn:disabled { opacity:.5; cursor:default; }
+}
